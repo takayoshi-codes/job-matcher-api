@@ -7,11 +7,12 @@ import csv
 import io
 import time
 import numpy as np
-import google.generativeai as genai
+
+from google import genai
+from google.genai import types
 
 app = FastAPI(title="Job Matcher API")
 
-# CORS設定（明示的に全許可）
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -23,8 +24,7 @@ app.add_middleware(
 # Gemini API 設定
 api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
 print(f"API key loaded: {bool(api_key)}")
-genai.configure(api_key=api_key)
-gemini = genai.GenerativeModel("gemini-1.5-flash")
+client = genai.Client(api_key=api_key)
 
 print("Job Matcher API ready.")
 
@@ -39,12 +39,12 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
 
 def get_embedding(text: str) -> np.ndarray:
     text = text[:1000]
-    result = genai.embed_content(
-        model="models/text-embedding-004",
-        content=text,
-        task_type="SEMANTIC_SIMILARITY",
+    result = client.models.embed_content(
+        model="text-embedding-004",
+        contents=text,
+        config=types.EmbedContentConfig(task_type="SEMANTIC_SIMILARITY"),
     )
-    return np.array(result["embedding"])
+    return np.array(result.embeddings[0].values)
 
 
 def find_missing_skills(job_skills: list[str], career_text: str) -> list[str]:
@@ -76,7 +76,10 @@ def generate_advice(job_text: str, career_text: str, missing_skills: list[str], 
 4. 応募に向けた次のステップ（3つ）
 """
     try:
-        response = gemini.generate_content(prompt)
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt,
+        )
         return response.text
     except Exception as e:
         return f"アドバイス生成エラー: {str(e)}"
@@ -117,15 +120,6 @@ class MatchResult(BaseModel):
 @app.get("/")
 def health():
     return {"status": "ok", "message": "Job Matcher API is running"}
-
-
-@app.options("/match")
-def match_options():
-    return JSONResponse(content={}, headers={
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "*",
-    })
 
 
 @app.post("/match", response_model=MatchResult)
@@ -170,15 +164,6 @@ def match(req: MatchRequest):
         missing_skills=missing,
         advice=advice,
     )
-
-
-@app.options("/parse-csv")
-def parse_csv_options():
-    return JSONResponse(content={}, headers={
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "*",
-    })
 
 
 @app.post("/parse-csv")
