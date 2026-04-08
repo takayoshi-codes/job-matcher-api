@@ -21,7 +21,9 @@ app.add_middleware(
 )
 
 # Gemini API 設定
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY", ""))
+api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
+print(f"API key loaded: {bool(api_key)}")
+genai.configure(api_key=api_key)
 gemini = genai.GenerativeModel("gemini-1.5-flash")
 
 print("Job Matcher API ready.")
