@@ -1,25 +1,28 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import os
 import csv
 import io
 import time
 import numpy as np
-from google import genai
-from google.genai import types
+import google.generativeai as genai
 
 app = FastAPI(title="Job Matcher API")
 
+# CORS設定（明示的に全許可）
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
 # Gemini API 設定
-client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
+genai.configure(api_key=os.environ.get("GEMINI_API_KEY", ""))
+gemini = genai.GenerativeModel("gemini-1.5-flash")
 
 print("Job Matcher API ready.")
 
@@ -33,29 +36,21 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def get_embedding(text: str) -> np.ndarray:
-    """Gemini Embedding APIでテキストをベクトル化する。"""
     text = text[:1000]
-    result = client.models.embed_content(
-        model="text-embedding-004",
-        contents=text,
-        config=types.EmbedContentConfig(task_type="SEMANTIC_SIMILARITY"),
+    result = genai.embed_content(
+        model="models/text-embedding-004",
+        content=text,
+        task_type="SEMANTIC_SIMILARITY",
     )
-    return np.array(result.embeddings[0].values)
+    return np.array(result["embedding"])
 
 
 def find_missing_skills(job_skills: list[str], career_text: str) -> list[str]:
-    """求人スキルのうち、職務経歴に含まれないものを返す。"""
     career_lower = career_text.lower()
     return [skill for skill in job_skills if skill.lower() not in career_lower]
 
 
-def generate_advice(
-    job_text: str,
-    career_text: str,
-    missing_skills: list[str],
-    score: float,
-) -> str:
-    """Gemini APIで改善アドバイスを生成。"""
+def generate_advice(job_text: str, career_text: str, missing_skills: list[str], score: float) -> str:
     prompt = f"""
 あなたはキャリアアドバイザーです。
 以下の情報を基に、応募者が求人に採用されるための具体的な改善アドバイスを日本語で作成してください。
@@ -79,10 +74,7 @@ def generate_advice(
 4. 応募に向けた次のステップ（3つ）
 """
     try:
-        response = client.models.generate_content(
-            model="gemini-1.5-flash",
-            contents=prompt,
-        )
+        response = gemini.generate_content(prompt)
         return response.text
     except Exception as e:
         return f"アドバイス生成エラー: {str(e)}"
@@ -125,10 +117,17 @@ def health():
     return {"status": "ok", "message": "Job Matcher API is running"}
 
 
+@app.options("/match")
+def match_options():
+    return JSONResponse(content={}, headers={
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "*",
+    })
+
+
 @app.post("/match", response_model=MatchResult)
 def match(req: MatchRequest):
-    """職務経歴と求人票のマッチングスコアを算出する。"""
-
     job_text = " ".join([
         req.job.title,
         " ".join(req.job.required_skills),
@@ -147,7 +146,6 @@ def match(req: MatchRequest):
     if not job_text or not career_text:
         raise HTTPException(status_code=400, detail="求人票または職務経歴が空です")
 
-    # Gemini Embedding でベクトル化（リトライあり）
     score = 0.0
     for attempt in range(3):
         try:
@@ -160,11 +158,8 @@ def match(req: MatchRequest):
                 raise HTTPException(status_code=500, detail=f"Embedding エラー: {str(e)}")
             time.sleep(2)
 
-    # 不足スキル検出
     all_job_skills = req.job.required_skills + req.job.preferred_skills
     missing = find_missing_skills(all_job_skills, career_text)
-
-    # Gemini アドバイス生成
     advice = generate_advice(job_text, career_text, missing, score)
 
     return MatchResult(
@@ -175,9 +170,17 @@ def match(req: MatchRequest):
     )
 
 
+@app.options("/parse-csv")
+def parse_csv_options():
+    return JSONResponse(content={}, headers={
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "*",
+    })
+
+
 @app.post("/parse-csv")
 async def parse_csv(file: UploadFile = File(...)):
-    """Career Builder が出力したCSVを受け取り、CareerInput形式に変換する。"""
     try:
         content = await file.read()
         decoded = content.decode("utf-8-sig")
