@@ -6,7 +6,8 @@ import csv
 import io
 import time
 import numpy as np
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 app = FastAPI(title="Job Matcher API")
 
@@ -18,8 +19,7 @@ app.add_middleware(
 )
 
 # Gemini API 設定
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY", ""))
-gemini = genai.GenerativeModel("gemini-1.5-flash")
+client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
 
 print("Job Matcher API ready.")
 
@@ -34,14 +34,13 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
 
 def get_embedding(text: str) -> np.ndarray:
     """Gemini Embedding APIでテキストをベクトル化する。"""
-    # テキストを1000文字に制限（タイムアウト対策）
     text = text[:1000]
-    result = genai.embed_content(
-        model="models/text-embedding-004",
-        content=text,
-        task_type="SEMANTIC_SIMILARITY",
+    result = client.models.embed_content(
+        model="text-embedding-004",
+        contents=text,
+        config=types.EmbedContentConfig(task_type="SEMANTIC_SIMILARITY"),
     )
-    return np.array(result["embedding"])
+    return np.array(result.embeddings[0].values)
 
 
 def find_missing_skills(job_skills: list[str], career_text: str) -> list[str]:
@@ -80,7 +79,10 @@ def generate_advice(
 4. 応募に向けた次のステップ（3つ）
 """
     try:
-        response = gemini.generate_content(prompt)
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt,
+        )
         return response.text
     except Exception as e:
         return f"アドバイス生成エラー: {str(e)}"
