@@ -4,6 +4,7 @@ from pydantic import BaseModel
 import os
 import csv
 import io
+import time
 import numpy as np
 import google.generativeai as genai
 
@@ -33,6 +34,8 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
 
 def get_embedding(text: str) -> np.ndarray:
     """Gemini Embedding APIでテキストをベクトル化する。"""
+    # テキストを1000文字に制限（タイムアウト対策）
+    text = text[:1000]
     result = genai.embed_content(
         model="models/text-embedding-004",
         content=text,
@@ -142,13 +145,18 @@ def match(req: MatchRequest):
     if not job_text or not career_text:
         raise HTTPException(status_code=400, detail="求人票または職務経歴が空です")
 
-    # Gemini Embedding でベクトル化
-    try:
-        job_vec = get_embedding(job_text)
-        career_vec = get_embedding(career_text)
-        score = cosine_similarity(job_vec, career_vec)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Embedding エラー: {str(e)}")
+    # Gemini Embedding でベクトル化（リトライあり）
+    score = 0.0
+    for attempt in range(3):
+        try:
+            job_vec = get_embedding(job_text)
+            career_vec = get_embedding(career_text)
+            score = cosine_similarity(job_vec, career_vec)
+            break
+        except Exception as e:
+            if attempt == 2:
+                raise HTTPException(status_code=500, detail=f"Embedding エラー: {str(e)}")
+            time.sleep(2)
 
     # 不足スキル検出
     all_job_skills = req.job.required_skills + req.job.preferred_skills
