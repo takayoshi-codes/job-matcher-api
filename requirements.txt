@@ -1,7 +1,6 @@
 fastapi
 uvicorn[standard]
 pydantic
-sentence-transformers
 google-generativeai
 numpy
 python-multipart

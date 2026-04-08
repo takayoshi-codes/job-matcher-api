@@ -5,7 +5,6 @@ import os
 import csv
 import io
 import numpy as np
-from sentence_transformers import SentenceTransformer
 import google.generativeai as genai
 
 app = FastAPI(title="Job Matcher API")
@@ -17,28 +16,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# モデルのロード（起動時に1回だけ）
-print("Loading models...")
-sbert_model = SentenceTransformer("paraphrase-multilingual-mpnet-base-v2")
-
-# Gemini API
+# Gemini API 設定
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY", ""))
 gemini = genai.GenerativeModel("gemini-1.5-flash")
 
-print("Models loaded.")
+print("Job Matcher API ready.")
 
 
 # ── ユーティリティ ──
-
-def tokenize_ja(text: str) -> list[str]:
-    """MeCabで分かち書き。失敗時はスペース分割。"""
-    if mecab:
-        try:
-            return mecab.parse(text).strip().split()
-        except:
-            pass
-    return text.split()
-
 
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     if np.linalg.norm(a) == 0 or np.linalg.norm(b) == 0:
@@ -46,37 +31,27 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
 
 
-def sbert_encode(text: str) -> np.ndarray:
-    return sbert_model.encode(text, normalize_embeddings=True)
-
-
-def w2v_encode(text: str) -> np.ndarray | None:
-    if not w2v_model:
-        return None
-    tokens = tokenize_ja(text)
-    vecs = [w2v_model[t] for t in tokens if t in w2v_model]
-    if not vecs:
-        return None
-    return np.mean(vecs, axis=0)
+def get_embedding(text: str) -> np.ndarray:
+    """Gemini Embedding APIでテキストをベクトル化する。"""
+    result = genai.embed_content(
+        model="models/text-embedding-004",
+        content=text,
+        task_type="SEMANTIC_SIMILARITY",
+    )
+    return np.array(result["embedding"])
 
 
 def find_missing_skills(job_skills: list[str], career_text: str) -> list[str]:
     """求人スキルのうち、職務経歴に含まれないものを返す。"""
     career_lower = career_text.lower()
-    missing = []
-    for skill in job_skills:
-        # 完全一致 or 部分一致で確認
-        if skill.lower() not in career_lower:
-            missing.append(skill)
-    return missing
+    return [skill for skill in job_skills if skill.lower() not in career_lower]
 
 
 def generate_advice(
     job_text: str,
     career_text: str,
     missing_skills: list[str],
-    score_sbert: float,
-    score_w2v: float | None,
+    score: float,
 ) -> str:
     """Gemini APIで改善アドバイスを生成。"""
     prompt = f"""
@@ -90,8 +65,7 @@ def generate_advice(
 {career_text[:800]}
 
 【マッチングスコア】
-BERT類似度: {score_sbert:.0%}
-{"Word2Vec類似度: " + f"{score_w2v:.0%}" if score_w2v is not None else ""}
+類似度: {score:.0%}
 
 【不足スキル】
 {", ".join(missing_skills) if missing_skills else "特になし"}
@@ -120,11 +94,11 @@ class JobInput(BaseModel):
 
 class CareerInput(BaseModel):
     name: str = ""
-    skills: str = ""          # 技術スタック（カンマ区切り）
+    skills: str = ""
     summary_consulting: str = ""
     summary_management: str = ""
     summary_it: str = ""
-    projects: str = ""        # 職務経歴テキスト
+    projects: str = ""
 
 
 class MatchRequest(BaseModel):
@@ -150,7 +124,6 @@ def health():
 def match(req: MatchRequest):
     """職務経歴と求人票のマッチングスコアを算出する。"""
 
-    # テキストを結合
     job_text = " ".join([
         req.job.title,
         " ".join(req.job.required_skills),
@@ -169,28 +142,24 @@ def match(req: MatchRequest):
     if not job_text or not career_text:
         raise HTTPException(status_code=400, detail="求人票または職務経歴が空です")
 
-    # BERT スコア
-    job_vec_sbert = sbert_encode(job_text)
-    career_vec_sbert = sbert_encode(career_text)
-    score_sbert = cosine_similarity(job_vec_sbert, career_vec_sbert)
+    # Gemini Embedding でベクトル化
+    try:
+        job_vec = get_embedding(job_text)
+        career_vec = get_embedding(career_text)
+        score = cosine_similarity(job_vec, career_vec)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Embedding エラー: {str(e)}")
 
-    # Word2Vec スコア
-    score_w2v = None
-    job_vec_w2v = w2v_encode(job_text)
-    career_vec_w2v = w2v_encode(career_text)
-    if job_vec_w2v is not None and career_vec_w2v is not None:
-        score_w2v = cosine_similarity(job_vec_w2v, career_vec_w2v)
-
-    # 不足スキル
+    # 不足スキル検出
     all_job_skills = req.job.required_skills + req.job.preferred_skills
     missing = find_missing_skills(all_job_skills, career_text)
 
-    # Gemini アドバイス
-    advice = generate_advice(job_text, career_text, missing, score_sbert, score_w2v)
+    # Gemini アドバイス生成
+    advice = generate_advice(job_text, career_text, missing, score)
 
     return MatchResult(
-        score_sbert=round(score_sbert, 4),
-        score_w2v=round(score_w2v, 4) if score_w2v is not None else None,
+        score_sbert=round(score, 4),
+        score_w2v=None,
         missing_skills=missing,
         advice=advice,
     )
@@ -201,14 +170,14 @@ async def parse_csv(file: UploadFile = File(...)):
     """Career Builder が出力したCSVを受け取り、CareerInput形式に変換する。"""
     try:
         content = await file.read()
-        decoded = content.decode("utf-8-sig")  # BOM対応
+        decoded = content.decode("utf-8-sig")
         reader = csv.reader(io.StringIO(decoded))
         rows = list(reader)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"CSVパースエラー: {str(e)}")
 
     data: dict[str, str] = {}
-    for row in rows[1:]:  # ヘッダー行をスキップ
+    for row in rows[1:]:
         if len(row) >= 3:
             section, key, value = row[0], row[1], row[2]
             data[f"{section}_{key}"] = value
