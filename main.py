@@ -7,9 +7,6 @@ import io
 import numpy as np
 from sentence_transformers import SentenceTransformer
 import google.generativeai as genai
-from gensim.models import KeyedVectors
-from gensim.downloader import load as gensim_load
-import MeCab
 
 app = FastAPI(title="Job Matcher API")
 
@@ -23,19 +20,6 @@ app.add_middleware(
 # モデルのロード（起動時に1回だけ）
 print("Loading models...")
 sbert_model = SentenceTransformer("paraphrase-multilingual-mpnet-base-v2")
-
-# Word2Vec（日本語学習済みモデル）
-# 初回はダウンロードに時間がかかります
-try:
-    w2v_model = gensim_load("glove-wiki-gigaword-100")  # 英語fallback
-except:
-    w2v_model = None
-
-# MeCab（日本語形態素解析）
-try:
-    mecab = MeCab.Tagger("-Owakati")
-except:
-    mecab = None
 
 # Gemini API
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY", ""))

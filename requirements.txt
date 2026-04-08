@@ -2,9 +2,6 @@ fastapi==0.111.0
 uvicorn[standard]==0.30.1
 pydantic==2.7.1
 sentence-transformers==3.0.1
-gensim==4.3.2
-mecab-python3==1.0.9
-unidic-lite==1.0.8
 google-generativeai==0.7.2
 numpy==1.26.4
 python-multipart==0.0.9
