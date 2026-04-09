@@ -60,7 +60,7 @@ def get_embedding(text: str) -> np.ndarray:
 
 def generate_gemini_text(prompt: str) -> str:
     """Gemini APIでテキストを生成する。複数モデルにフォールバック。"""
-    models = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-pro"]
+    models = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"]
     for model in models:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={API_KEY}"
