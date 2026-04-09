@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+﻿from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os
@@ -275,12 +275,16 @@ def match(req: MatchRequest):
     # 応募可能求人タイプの提案
     job_suggestions = generate_job_suggestions(career_text)
 
+    # 検索キーワード生成
+    search_keywords = generate_search_keywords(job_text, career_text)
+
     return MatchResult(
         score_sbert=round(score, 4),
         score_w2v=None,
         missing_skills=missing,
         advice=advice,
         job_suggestions=job_suggestions,
+        search_keywords=search_keywords,
     )
 
 
@@ -338,3 +342,4 @@ async def parse_csv(file: UploadFile = File(...)):
     )
 
     return career.model_dump()
+
