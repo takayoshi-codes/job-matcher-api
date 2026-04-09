@@ -124,6 +124,39 @@ def generate_full_analysis(
     return generate_gemini_text(prompt)
 
 
+def generate_search_keywords(job_text: str, career_text: str) -> list[str]:
+    """求人票と職務経歴から検索キーワードを生成する。"""
+    prompt = f"""
+あなたは副業・フリーランス求人の検索エキスパートです。
+以下の求人情報と職務経歴を分析して、求人サイトで検索するのに最適なキーワードを5個生成してください。
+
+【求人情報】
+{job_text[:400]}
+
+【職務経歴・スキル】
+{career_text[:400]}
+
+ルール：
+- 各キーワードは2〜5単語程度の日本語で
+- 求人サイトの検索欄に入力して使えるもの
+- 具体的なスキル名・職種名・業界名を含める
+- JSON配列のみで返す（説明文不要）
+
+例：["Python Django", "AIエンジニア 副業", "バックエンド開発 週2", "機械学習 フリーランス", "Webアプリ PM"]
+
+JSON配列のみを返してください："""
+    try:
+        text = generate_gemini_text(prompt)
+        import json, re
+        match = re.search(r'\[.*?\]', text, re.DOTALL)
+        if match:
+            keywords = json.loads(match.group())
+            return [str(k) for k in keywords[:5]]
+    except Exception:
+        pass
+    return []
+
+
 def generate_job_suggestions(career_text: str) -> str:
     """職務経歴だけから応募可能な求人タイプを提案する。"""
     prompt = f"""
@@ -178,6 +211,7 @@ class MatchResult(BaseModel):
     missing_skills: list[str]
     advice: str
     job_suggestions: str
+    search_keywords: list[str]
 
 
 class CareerAnalysisRequest(BaseModel):
