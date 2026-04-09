@@ -36,9 +36,9 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
 def get_embedding(text: str) -> np.ndarray:
     """Gemini REST APIでテキストをベクトル化する。"""
     text = text[:1000]
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={API_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key={API_KEY}"
     payload = json.dumps({
-        "model": "models/text-embedding-004",
+        "model": "models/gemini-embedding-001",
         "content": {"parts": [{"text": text}]},
         "taskType": "SEMANTIC_SIMILARITY",
     }).encode("utf-8")
