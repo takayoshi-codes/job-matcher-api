@@ -126,35 +126,37 @@ def generate_full_analysis(
 
 def generate_search_keywords(job_text: str, career_text: str) -> list[str]:
     """求人票と職務経歴から検索キーワードを生成する。"""
+    import json, re as re_module
     prompt = f"""
-あなたは副業・フリーランス求人の検索エキスパートです。
-以下の求人情報と職務経歴を分析して、求人サイトで検索するのに最適なキーワードを5個生成してください。
+副業・フリーランス求人サイトで使える検索キーワードを5個、JSON配列で返してください。
 
-【求人情報】
-{job_text[:400]}
+求人: {job_text[:300]}
+スキル: {career_text[:300]}
 
-【職務経歴・スキル】
-{career_text[:400]}
-
-ルール：
-- 各キーワードは2〜5単語程度の日本語で
-- 求人サイトの検索欄に入力して使えるもの
-- 具体的なスキル名・職種名・業界名を含める
-- JSON配列のみで返す（説明文不要）
-
-例：["Python Django", "AIエンジニア 副業", "バックエンド開発 週2", "機械学習 フリーランス", "Webアプリ PM"]
-
-JSON配列のみを返してください："""
+必ずJSON配列のみ返すこと。例: ["Python Django", "AIエンジニア", "バックエンド 副業", "機械学習", "Webアプリ開発"]
+"""
     try:
         text = generate_gemini_text(prompt)
-        import json, re
-        match = re.search(r'\[.*?\]', text, re.DOTALL)
+        if not text or "失敗" in text:
+            raise ValueError("generation failed")
+        match = re_module.search(r'\[.*?\]', text, re_module.DOTALL)
         if match:
             keywords = json.loads(match.group())
-            return [str(k) for k in keywords[:5]]
+            return [str(k) for k in keywords[:5] if k]
     except Exception:
         pass
-    return []
+    # フォールバック：求人タイトルとスキルから自動生成
+    fallback = []
+    words = (job_text + " " + career_text).split()
+    skills = [w for w in words if any(s in w for s in ["Python","Django","Next","React","AWS","AI","ML","Java","PHP"])]
+    if skills:
+        fallback.append(skills[0] + " 副業")
+        fallback.append(skills[0] + " フリーランス")
+    if job_text:
+        title_words = job_text.split()[:3]
+        fallback.append(" ".join(title_words))
+    fallback.extend(["エンジニア 副業", "Webアプリ開発"])
+    return list(dict.fromkeys(fallback))[:5]
 
 
 def generate_job_suggestions(career_text: str) -> str:
