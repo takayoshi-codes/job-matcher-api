@@ -1,15 +1,14 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import os
 import csv
 import io
 import time
+import json
 import numpy as np
-
-from google import genai
-from google.genai import types
+import urllib.request
+import urllib.error
 
 app = FastAPI(title="Job Matcher API")
 
@@ -21,11 +20,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Gemini API 設定
-api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
-print(f"API key loaded: {bool(api_key)}")
-client = genai.Client(api_key=api_key, http_options={"api_version": "v1"})
-
+API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
+print(f"API key loaded: {bool(API_KEY)}")
 print("Job Matcher API ready.")
 
 
@@ -38,13 +34,23 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def get_embedding(text: str) -> np.ndarray:
+    """Gemini REST APIでテキストをベクトル化する。"""
     text = text[:1000]
-    result = client.models.embed_content(
-        model="text-embedding-004",
-        contents=text,
-        config=types.EmbedContentConfig(task_type="SEMANTIC_SIMILARITY"),
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={API_KEY}"
+    payload = json.dumps({
+        "model": "models/text-embedding-004",
+        "content": {"parts": [{"text": text}]},
+        "taskType": "SEMANTIC_SIMILARITY",
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
     )
-    return np.array(result.embeddings[0].values)
+    with urllib.request.urlopen(req, timeout=30) as res:
+        data = json.loads(res.read())
+    return np.array(data["embedding"]["values"])
 
 
 def find_missing_skills(job_skills: list[str], career_text: str) -> list[str]:
@@ -53,6 +59,7 @@ def find_missing_skills(job_skills: list[str], career_text: str) -> list[str]:
 
 
 def generate_advice(job_text: str, career_text: str, missing_skills: list[str], score: float) -> str:
+    """Gemini REST APIで改善アドバイスを生成。"""
     prompt = f"""
 あなたはキャリアアドバイザーです。
 以下の情報を基に、応募者が求人に採用されるための具体的な改善アドバイスを日本語で作成してください。
@@ -75,12 +82,20 @@ def generate_advice(job_text: str, career_text: str, missing_skills: list[str], 
 3. アピールできる強み（職務経歴から読み取れるもの）
 4. 応募に向けた次のステップ（3つ）
 """
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={API_KEY}"
+    payload = json.dumps({
+        "contents": [{"parts": [{"text": prompt}]}]
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
     try:
-        response = client.models.generate_content(
-            model="gemini-1.5-flash",
-            contents=prompt,
-        )
-        return response.text
+        with urllib.request.urlopen(req, timeout=30) as res:
+            data = json.loads(res.read())
+        return data["candidates"][0]["content"]["parts"][0]["text"]
     except Exception as e:
         return f"アドバイス生成エラー: {str(e)}"
 
