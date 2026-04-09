@@ -40,7 +40,7 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
 def get_embedding(text: str) -> np.ndarray:
     text = text[:1000]
     result = client.models.embed_content(
-        model="models/text-embedding-004",
+        model="text-embedding-004",
         contents=text,
         config=types.EmbedContentConfig(task_type="SEMANTIC_SIMILARITY"),
     )
